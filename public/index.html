@@ -1,0 +1,71 @@
+<html>
+
+<head></head>
+<body style="margin: 0;">
+  <video></video>
+</body>
+
+<script>
+let ws = null;
+let peerConnection = null
+
+window.addEventListener('load', () => {
+  ws = new WebSocket(`wss://${location.hostname}:8801`)
+
+  ws.addEventListener('open', (event) => {
+    console.log('ws: open')
+
+    const pcConfig = { iceServers: [] }
+    peerConnection = new RTCPeerConnection(pcConfig)
+
+    peerConnection.onicecandidate = function(event) {
+      if (event.candidate) {
+        // console.log(event.candidate)
+      } else {
+        console.log('send offer')
+        ws.send(JSON.stringify(peerConnection.localDescription))
+      }
+    }
+
+    peerConnection.ontrack = function(event) {
+      const video = document.querySelector('video')
+      video.srcObject = event.streams[0]
+      video.onloadedmetadata = (e) => video.play()
+    }
+
+    navigator.mediaDevices.getUserMedia({video: true, audio: false})
+    .then((stream) => {
+      peerConnection.addTrack(stream.getTracks()[0], stream)
+      peerConnection.createOffer()
+      .then((sessionDescription) => {
+        return peerConnection.setLocalDescription(sessionDescription)
+      })
+      .then(() => {
+        console.log('setLocalDescription() OK')
+      }).catch(function(err) {
+        console.error(err);
+      })
+    })
+  })
+
+  ws.addEventListener('close', () => {
+
+  })
+
+  ws.addEventListener('message', (event) => {
+    console.log('receive answer')
+    const msg = JSON.parse(event.data)
+    const answer = new RTCSessionDescription(msg)
+    peerConnection.setRemoteDescription(answer)
+    .then(() => {
+      console.log('set answer')
+    })
+  })
+
+  window.addEventListener('beforeunload', (event) => {
+    ws.close()
+  })
+})
+</script>
+
+</html>

@@ -1,0 +1,116 @@
+<html>
+
+<head></head>
+<body>
+  <video></video>
+</body>
+
+<script>
+'use strict'
+
+const { networkInterfaces } = require('os')
+
+const nets = networkInterfaces()
+const results = []
+
+for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+        if (net.family === 'IPv4' && !net.internal) {
+            results.push(net.address);
+        }
+    }
+}
+
+console.log(results)
+
+
+let ws = null;
+let peerConnection = null
+
+window.addEventListener('load', () => {
+  ws = new WebSocket(`wss://${results[0]}:8801`)
+
+  ws.addEventListener('open', (event) => {
+    console.log('ws: open')
+  })
+
+  ws.addEventListener('close', () => {
+
+  })
+
+  ws.addEventListener('message', (event) => {
+    console.log('receive offer')
+    const msg = JSON.parse(event.data)
+    peerConnection.setRemoteDescription(msg)
+    .then(() => {
+      peerConnection.createAnswer()
+      .then((sessionDescription) => {
+        return peerConnection.setLocalDescription(sessionDescription)
+      })
+      .then(() => {
+        console.log('setLocalDescription() OK')
+      }).catch(function(err) {
+        console.error(err);
+      })
+    })
+  })
+
+  window.addEventListener('beforeunload', (event) => {
+    ws.close()
+  })
+})
+
+const { desktopCapturer } = require('electron')
+
+desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async sources => {
+  for (const source of sources) {
+    console.log(source)
+    if (source.name === 'Screen 1') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: source.id,
+              minWidth: 1280,
+              maxWidth: 1920,
+              minHeight: 720,
+              maxHeight: 1080
+            }
+          }
+        })
+        handleStream(stream)
+      } catch (e) {
+        handleError(e)
+      }
+      return
+    }
+  }
+})
+
+function handleStream(stream) {
+  const video = document.querySelector('video')
+  video.srcObject = stream
+  video.onloadedmetadata = (e) => video.play()
+
+  const pcConfig = { iceServers: [] }
+  peerConnection = new RTCPeerConnection(pcConfig)
+  peerConnection.onicecandidate = function(event) {
+    if (event.candidate) {
+      // console.log(event.candidate)
+    } else {
+      console.log('send answer')
+      ws.send(JSON.stringify(peerConnection.localDescription))
+    }
+  }
+  peerConnection.addTrack(stream.getTracks()[0], stream)
+}
+
+function handleError(e) {
+  console.log(e)
+}
+</script>
+
+</html>

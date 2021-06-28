@@ -2,78 +2,101 @@
 
 <head></head>
 <body>
-  <video></video>
+  <div id="app">
+    <div>https://{{ ip }}:8800</div>
+    <div>
+      <select v-model="source" style="width: 100%;">
+        <option v-for="source in sources" :value="source" :key="source.id">{{ source.name }}</option>
+      </select>
+    </div>
+    <video style="width: 100%;"></video>
+  </div>
 </body>
 
 <script>
 'use strict'
 
 const { networkInterfaces } = require('os')
+const { desktopCapturer } = require('electron')
+const Vue = require('vue')
 
-const nets = networkInterfaces()
-const results = []
+const app = {
+  data() {
+    return {
+      ip: '',
+      ws: null,
+      peerConnection: null,
+      sources: [],
+      source: null,
+      sender: null,
+      video: null
+    }
+  },
+  mounted() {
+    const nets = networkInterfaces()
+    const results = []
 
-for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
-        if (net.family === 'IPv4' && !net.internal) {
-            results.push(net.address);
+    for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+            // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+            if (net.family === 'IPv4' && !net.internal) {
+                results.push(net.address);
+            }
         }
     }
-}
 
-console.log(results)
+    console.log(results)
+    this.ip = results[0]
 
 
-let ws = null;
-let peerConnection = null
+    this.ws = new WebSocket(`wss://${this.ip}:8801`)
 
-window.addEventListener('load', () => {
-  ws = new WebSocket(`wss://${results[0]}:8801`)
+    this.ws.addEventListener('open', (event) => {
+      console.log('ws: open')
+    })
 
-  ws.addEventListener('open', (event) => {
-    console.log('ws: open')
-  })
+    this.ws.addEventListener('close', () => {
 
-  ws.addEventListener('close', () => {
+    })
 
-  })
-
-  ws.addEventListener('message', (event) => {
-    console.log('receive offer')
-    const msg = JSON.parse(event.data)
-    peerConnection.setRemoteDescription(msg)
-    .then(() => {
-      peerConnection.createAnswer()
-      .then((sessionDescription) => {
-        return peerConnection.setLocalDescription(sessionDescription)
-      })
+    this.ws.addEventListener('message', (event) => {
+      console.log('receive offer')
+      const msg = JSON.parse(event.data)
+      this.peerConnection.setRemoteDescription(msg)
       .then(() => {
-        console.log('setLocalDescription() OK')
-      }).catch(function(err) {
-        console.error(err);
+        this.peerConnection.createAnswer()
+        .then((sessionDescription) => {
+          return this.peerConnection.setLocalDescription(sessionDescription)
+        })
+        .then(() => {
+          console.log('setLocalDescription() OK')
+        }).catch(function(err) {
+          console.error(err);
+        })
       })
     })
-  })
 
-  window.addEventListener('beforeunload', (event) => {
+
+    desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async (sources) => {
+      this.sources = sources
+      console.log(this.sources)
+    })
+
+    this.video = document.querySelector('video')
+    this.video.onloadedmetadata = (e) => this.video.play()
+  },
+  unmounted() {
     ws.close()
-  })
-})
-
-const { desktopCapturer } = require('electron')
-
-desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async sources => {
-  for (const source of sources) {
-    console.log(source)
-    if (source.name === 'Screen 1') {
+  },
+  watch:{
+    async source() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             mandatory: {
               chromeMediaSource: 'desktop',
-              chromeMediaSourceId: source.id,
+              chromeMediaSourceId: this.source.id,
               minWidth: 1280,
               maxWidth: 1920,
               minHeight: 720,
@@ -81,36 +104,42 @@ desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async sources =
             }
           }
         })
-        handleStream(stream)
+        this.handleStream(stream)
       } catch (e) {
-        handleError(e)
+        this.handleError(e)
       }
-      return
     }
-  }
-})
+  },
+  methods: {
+    handleStream(stream) {
+      if (this.peerConnection === null) {
+        const pcConfig = { iceServers: [] }
+        this.peerConnection = new RTCPeerConnection(pcConfig)
+        this.peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            // console.log(event.candidate)
+          } else {
+            console.log('send answer')
+            this.ws.send(JSON.stringify(this.peerConnection.localDescription))
+          }
+        }
+      }
 
-function handleStream(stream) {
-  const video = document.querySelector('video')
-  video.srcObject = stream
-  video.onloadedmetadata = (e) => video.play()
+      this.video.srcObject = stream
 
-  const pcConfig = { iceServers: [] }
-  peerConnection = new RTCPeerConnection(pcConfig)
-  peerConnection.onicecandidate = function(event) {
-    if (event.candidate) {
-      // console.log(event.candidate)
-    } else {
-      console.log('send answer')
-      ws.send(JSON.stringify(peerConnection.localDescription))
+      if (this.sender) {
+        this.sender.replaceTrack(stream.getTracks()[0], stream)
+      } else {
+        this.sender = this.peerConnection.addTrack(stream.getTracks()[0], stream)
+      }
+    },
+    handleError(e) {
+      console.log(e)
     }
-  }
-  peerConnection.addTrack(stream.getTracks()[0], stream)
+  },
 }
 
-function handleError(e) {
-  console.log(e)
-}
+Vue.createApp(app).mount('#app')
 </script>
 
 </html>

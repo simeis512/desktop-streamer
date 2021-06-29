@@ -5,11 +5,11 @@
   <div id="app">
     <div>https://{{ ip }}:8800</div>
     <div>
-      <select v-model="source" style="width: 100%;">
-        <option v-for="source in sources" :value="source" :key="source.id">{{ source.name }}</option>
+      <select v-model="source" style="width: 100%;" @click="getSources">
+        <option v-model="sources" v-for="source in sources" :value="source" :key="source.id">{{ source.name }}</option>
       </select>
     </div>
-    <video style="width: 100%; height: 100%; object-fit: contain;"></video>
+    <video style="width: 100%; height: calc(100% - 50px); object-fit: contain;"></video>
   </div>
 </body>
 
@@ -76,11 +76,7 @@ const app = {
       })
     })
 
-
-    desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async (sources) => {
-      this.sources = sources
-      console.log(this.sources)
-    })
+    this.getSources()
 
     this.video = document.querySelector('video')
     this.video.onloadedmetadata = (e) => this.video.play()
@@ -111,6 +107,12 @@ const app = {
     }
   },
   methods: {
+    async getSources() {
+      desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async (sources) => {
+        this.sources = sources
+        console.log(this.sources)
+      })
+    },
     handleStream(stream) {
       if (this.peerConnection === null) {
         const pcConfig = { iceServers: [] }
